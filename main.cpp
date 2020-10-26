@@ -28,10 +28,10 @@ int main()
 
             udp::endpoint desc_endpoint;
             auto desc_endpoints = resolver.async_resolve(udp::v4(), desc_host, desc_port, yield);
-            for(const udp::endpoint &ep : desc_endpoints)
+            for(const auto &ep : desc_endpoints)
             {
-                std::cout << "Resolved IP Address "  << ep.address().to_string() << ":" << ep.port() << std::endl;
                 desc_endpoint = ep;
+                std::cout << "Resolved IP Address "  << desc_endpoint << std::endl;
             }
 
             udp::endpoint read_endpoint(boost::asio::ip::udp::v4(), read_port);
@@ -45,12 +45,10 @@ int main()
                 udp::endpoint sender_endpoint;
                 std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
 
-                auto ep = sender_endpoint;
-                std::cout << "Read packet #" << id << " from "  << ep.address().to_string() << ":" << ep.port() << ", size = " << n << std::endl;
+                std::cout << "Read packet #" << id << " from "  << sender_endpoint << ", size = " << n << std::endl;
 
                 socket.async_send_to(boost::asio::buffer(buffer, n), desc_endpoint, yield);
-                ep = desc_endpoint;
-                std::cout << "Send packet #" << id << " to "  << ep.address().to_string() << ":" << ep.port() << ", size = " << n << std::endl;
+                std::cout << "Send packet #" << id << " to "  << desc_endpoint << ", size = " << n << std::endl;
             }
         }
         catch (std::exception& e)
