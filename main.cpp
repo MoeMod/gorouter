@@ -45,7 +45,7 @@ int main()
                 udp::endpoint sender_endpoint;
                 std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
 
-                giauto ep = sender_endpoint;
+                auto ep = sender_endpoint;
                 std::cout << "Read packet #" << id << " from "  << ep.address().to_string() << ":" << ep.port() << ", size = " << n << std::endl;
 
                 socket.async_send_to(boost::asio::buffer(buffer, n), desc_endpoint, yield);
