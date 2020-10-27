@@ -5,8 +5,18 @@
 #include <iterator>
 #include <json/json.h> // Using jsoncpp.
 
+class ServerData
+{
+	ServerData() {};
+	~ServerData() {};
+private:
+	std::size_t id;
+	std::string ip;
+	std::string game;
+	std::string proxy;
+};
+
 // Only using for template.
-// Idk what you want to do.
 bool BuildServerList()
 {
 	// opening the file
