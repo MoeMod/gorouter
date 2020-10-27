@@ -15,7 +15,8 @@ bool IsValidInitialPacket(const char *buffer, std::size_t n)
     //if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
     //    return true;
 
-    return false;
+    //return false;
+    return true;
 }
 
 int main()
