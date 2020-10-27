@@ -12,11 +12,8 @@ const auto desc_port = "6666";
 
 bool IsValidInitialPacket(const char *buffer, std::size_t n)
 {
-    //if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
-    //    return true;
+    return n >= 4 && !strncmp(buffer, "\xFF\xFF\xFF\xFF", 4);
 
-    //return false;
-    return true;
 }
 
 int main()
@@ -59,16 +56,16 @@ int main()
 
                 if(auto cd = MyClientManager.GetClientData(sender_endpoint))
                 {
-                    cd->OnRecv(buffer, n);
+                    cd->OnRecv(buffer, n, yield);
                 }
                 else
                 {
                     if(IsValidInitialPacket(buffer, n))
                     {
-                        cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](std::vector<char> vec, boost::asio::yield_context yield){
-                            socket.async_send_to(boost::asio::buffer(vec), sender_endpoint, yield);
+                        cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](const char *buffer, std::size_t len, boost::asio::yield_context yield){
+                            socket.async_send_to(boost::asio::buffer(buffer, len), sender_endpoint, yield);
                         });
-                        cd->OnRecv(buffer, n);
+                        cd->OnRecv(buffer, n, yield);
                     }
                     else
                     {
