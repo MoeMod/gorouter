@@ -1,12 +1,24 @@
 #include <iostream>
+#include <vector>
 
 #include "ThreadPoolContext.h"
+#include "ClientManager.h"
 
 #include <boost/asio/spawn.hpp>
 
-const auto read_port = 6666;
+const auto read_port = 80;
 const auto desc_host = "z4cs.com";
 const auto desc_port = "6666";
+
+bool IsValidInitialPacket(const char *buffer, std::size_t n)
+{
+    if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
+        return true;
+    if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
+        return true;
+
+    return false;
+}
 
 int main()
 {
@@ -37,18 +49,40 @@ int main()
             udp::endpoint read_endpoint(boost::asio::ip::udp::v4(), read_port);
             udp::socket socket(*ioc, read_endpoint);
 
+            ClientManager MyClientManager;
             char buffer[4096];
             int id = 0;
-            while(1)
+            while(true)
             {
                 ++id;
                 udp::endpoint sender_endpoint;
                 std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
-
                 std::cout << "Read packet #" << id << " from "  << sender_endpoint << ", size = " << n << std::endl;
 
-                socket.async_send_to(boost::asio::buffer(buffer, n), desc_endpoint, yield);
-                std::cout << "Send packet #" << id << " to "  << desc_endpoint << ", size = " << n << std::endl;
+                if(auto cd = MyClientManager.GetClientData(sender_endpoint))
+                {
+                    boost::asio::spawn(*ioc, [ioc, cd, pack_buffer = std::vector<char>(buffer, buffer + n)](boost::asio::yield_context yield) {
+                        cd->OnRecv(pack_buffer);
+                    });
+                }
+                else
+                {
+                    if(IsValidInitialPacket(buffer, n))
+                    {
+                        cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](std::vector<char> vec, boost::asio::yield_context yield){
+                            socket.async_send_to(boost::asio::buffer(vec), sender_endpoint, yield);
+                            std::cout << "Send reply packet to " << sender_endpoint << ", size = " << vec.size() << std::endl;
+                        });
+                        boost::asio::spawn(*ioc, [ioc, cd, pack_buffer = std::vector<char>(buffer, buffer + n)](boost::asio::yield_context yield) {
+                            cd->OnRecv(pack_buffer);
+                        });
+                    }
+                    else
+                    {
+                        std::cout << "Drop package #" << id << " due to not beginning with -1." << std::endl;
+                        continue;
+                    }
+                }
             }
         }
         catch (std::exception& e)
