@@ -12,10 +12,8 @@ const auto desc_port = "6666";
 
 bool IsValidInitialPacket(const char *buffer, std::size_t n)
 {
-    if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
-        return true;
-    if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
-        return true;
+    //if (n >= 23 && !strcmp(buffer, "\xFF\xFF\xFF\xFFgetchallenge steam\n"))
+    //    return true;
 
     return false;
 }
@@ -57,13 +55,10 @@ int main()
                 ++id;
                 udp::endpoint sender_endpoint;
                 std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
-                std::cout << "Read packet #" << id << " from "  << sender_endpoint << ", size = " << n << std::endl;
 
                 if(auto cd = MyClientManager.GetClientData(sender_endpoint))
                 {
-                    boost::asio::spawn(*ioc, [ioc, cd, pack_buffer = std::vector<char>(buffer, buffer + n)](boost::asio::yield_context yield) {
-                        cd->OnRecv(pack_buffer);
-                    });
+                    cd->OnRecv(buffer, n);
                 }
                 else
                 {
@@ -71,11 +66,8 @@ int main()
                     {
                         cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](std::vector<char> vec, boost::asio::yield_context yield){
                             socket.async_send_to(boost::asio::buffer(vec), sender_endpoint, yield);
-                            std::cout << "Send reply packet to " << sender_endpoint << ", size = " << vec.size() << std::endl;
                         });
-                        boost::asio::spawn(*ioc, [ioc, cd, pack_buffer = std::vector<char>(buffer, buffer + n)](boost::asio::yield_context yield) {
-                            cd->OnRecv(pack_buffer);
-                        });
+                        cd->OnRecv(buffer, n);
                     }
                     else
                     {

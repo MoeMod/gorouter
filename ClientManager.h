@@ -57,12 +57,12 @@ public:
         std::cout << "Add new client " << client_endpoint << " with new port " << proxy_endpoint << " " << std::endl;
     }
 
-    void OnRecv(std::vector<char> buffer)
+    void OnRecv(const char *buffer, std::size_t n)
     {
         // router => srcds
         last_recv_time = std::chrono::system_clock::now();
-        boost::asio::spawn(*ioc, [this, buffer = std::move(buffer)](boost::asio::yield_context yield) {
-            socket.async_send_to(boost::asio::buffer(buffer), srcds_endpoint, yield);
+        boost::asio::spawn(*ioc, [this, vec = std::vector<char>(buffer, buffer + n)](boost::asio::yield_context yield) {
+            socket.async_send_to(boost::asio::buffer(vec), srcds_endpoint, yield);
         });
     }
 };
