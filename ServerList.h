@@ -26,28 +26,23 @@
 }
 */
 
-class ServerData
+struct ServerData
 {
-	ServerData() {};
-	~ServerData() {};
-private:
-	std::size_t id;
+	int idx;
 	std::string ip;
 	std::string game;
 	std::string proxy;
 };
 
-// Only using for template.
-bool BuildServerList()
+std::vector<ServerData> BuildServerList() noexcept(false)
 {
-	// opening the file
+	ServerData data;
+	std::vector<ServerData> _ret;
+
 	std::ifstream i("serverlist.json", std::ios::binary);
 
-	if (!i.is_open())
-	{
-		throw std::exception("why cannot open the json file?");
-		return false;
-	}
+	if (!i.is_open()) throw std::exception("Unable to open \"serverlist.json\", aborting.");
+
 	std::string result;
 
 	std::copy(std::istream_iterator<unsigned char>(i), std::istream_iterator<unsigned char>(), std::back_inserter(result));
@@ -58,22 +53,19 @@ bool BuildServerList()
 	std::unique_ptr<Json::CharReader> const jsonReader(builder.newCharReader());
 
 	bool success = jsonReader->parse(result.c_str(), result.c_str() + result.length(), &root, &errs);
-	if (!success || !errs.empty()) 
-	{
-		std::cout << "parse Json err: " << errs << std::endl;
-		return false;
-	}
+	if (!success || !errs.empty()) std::cout << "parse Json err: " << errs << std::endl;
 
 	std::cout << "File name: " << root["name"].asString() << "\n" << std::endl;
 
 	servers = root["servers"];
-
 	for (std::size_t i = 0; i < servers.size(); i++)
 	{
-		std::cout << servers[i]["id"].asInt() << "\n" << std::endl;
-		std::cout << servers[i]["ip"].asString() << "\n" << std::endl;
-		std::cout << servers[i]["game"].asString() << "\n" << std::endl;
-		std::cout << servers[i]["proxy"].asString() << "\n" << std::endl;
+		data.idx = servers[i]["id"].asInt();
+		data.ip = servers[i]["ip"].asString();
+		data.game = servers[i]["game"].asString();
+		data.proxy = servers[i]["proxy"].asString();
+		_ret.push_back(data);
 	}
-	return true;
+
+	return _ret;
 }
