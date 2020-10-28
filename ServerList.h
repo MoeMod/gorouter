@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <fstream>
-#include "nlohmann/json.hpp" // configure by yourself in CMAKE
+#include "3rdparty/json/nlohmann/json.hpp"
 // Json file structure template.
 /*
 {
@@ -38,6 +38,9 @@ std::vector<ServerData> BuildServerList() noexcept(false)
 
 	using nlohmann::json;
 	std::ifstream i("serverlist.json");
+
+	if (!i.is_open()) throw std::exception("FATAL: Unable to open \"serverlist.json\"");
+
 	json j;
 	i >> j;
 
