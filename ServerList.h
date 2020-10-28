@@ -5,6 +5,27 @@
 #include <iterator>
 #include <json/json.h> // Using jsoncpp.
 
+// Json file structure template.
+/*
+{
+  "name": "ServerListReader",
+  "servers": [
+	{
+	  "id": 1,
+	  "ip": "wtf.org:27015",
+	  "game": "csgo",
+	  "proxy": "None"
+	},
+	{
+	  "id": 2,
+	  "ip": "wtf.org:27016",
+	  "game": "cs1.6",
+	  "proxy": "47"
+	}
+  ]
+}
+*/
+
 class ServerData
 {
 	ServerData() {};
