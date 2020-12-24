@@ -66,12 +66,21 @@ public:
         callback(std::move(callbackOnRecvSrcds))
     {
         last_recv_time = std::chrono::system_clock::now();
+        std::cout << "Add new client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
+    }
 
-        boost::asio::spawn(*ioc, [this](boost::asio::yield_context yield) {
+    ~ClientData()
+    {
+        std::cout << "Remove client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
+    }
+
+	void Run()
+    {
+        boost::asio::spawn(*ioc, [this, that = weak_from_this()](boost::asio::yield_context yield) {
             char buffer[4096];
             try
             {
-                while(true)
+                while (true)
                 {
                     endpoint_t sender_endpoint;
                     std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
@@ -81,9 +90,9 @@ public:
                     }
                 }
             }
-            catch (const boost::system::system_error &e)
+            catch (const boost::system::system_error& e)
             {
-                if(e.code() == boost::system::errc::operation_canceled)
+                if (e.code() == boost::system::errc::operation_canceled)
                     return;
                 std::cout << "Error: " << e.what() << std::endl;
             }
@@ -98,27 +107,21 @@ public:
                 {
                     timeout_timer.expires_from_now(10s);
                     timeout_timer.async_wait(yield);
-                    if(std::chrono::system_clock::now() > last_recv_time + 10s)
+                    if (std::chrono::system_clock::now() > last_recv_time + 10s)
                         break;
                 }
 
                 auto that = cm.RemoveClient(client_endpoint);
                 // auto delete this
             }
-            catch (const boost::system::system_error &e)
+            catch (const boost::system::system_error& e)
             {
-                if(e.code() == boost::system::errc::operation_canceled)
+                if (e.code() == boost::system::errc::operation_canceled)
                     return;
                 std::cout << "Error: " << e.what() << std::endl;
             }
-        });
+            });
 
-        std::cout << "Add new client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
-    }
-
-    ~ClientData()
-    {
-        std::cout << "Remove client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
     }
 
     void OnRecv(const char *buffer, std::size_t n, boost::asio::yield_context yield)
@@ -135,5 +138,6 @@ inline std::shared_ptr<ClientData> ClientManager::AcceptClient(std::shared_ptr<b
     std::unique_lock sl(sm);
     auto cd = std::make_shared<ClientData>(*this, ioc, from, to, callbackOnRecvSrcds);
     m_ClientMap.emplace(from, cd);
+    cd->Run();
     return cd;
 }

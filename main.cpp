@@ -50,29 +50,49 @@ int main()
             int id = 0;
             while(true)
             {
-                ++id;
-                udp::endpoint sender_endpoint;
-                std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
+            	try
+            	{
+                    ++id;
+                    udp::endpoint sender_endpoint;
 
-                if(auto cd = MyClientManager.GetClientData(sender_endpoint))
-                {
-                    cd->OnRecv(buffer, n, yield);
-                }
-                else
-                {
-                    if(IsValidInitialPacket(buffer, n))
+                    std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
+
+                    if (auto cd = MyClientManager.GetClientData(sender_endpoint))
                     {
-                        cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](const char *buffer, std::size_t len, boost::asio::yield_context yield){
-                            socket.async_send_to(boost::asio::buffer(buffer, len), sender_endpoint, yield);
-                        });
                         cd->OnRecv(buffer, n, yield);
                     }
                     else
                     {
-                        std::cout << "Drop package #" << id << " due to not beginning with -1." << std::endl;
-                        continue;
+                        if (IsValidInitialPacket(buffer, n))
+                        {
+                            cd = MyClientManager.AcceptClient(ioc, sender_endpoint, desc_endpoint, [ioc, &socket, sender_endpoint](const char* buffer, std::size_t len, boost::asio::yield_context yield) {
+
+                                socket.async_send_to(boost::asio::buffer(buffer, len), sender_endpoint, yield);
+                                });
+                            cd->OnRecv(buffer, n, yield);
+                        }
+                        else
+                        {
+                            std::cout << "Drop package #" << id << " due to not beginning with -1." << std::endl;
+                            continue;
+                        }
                     }
+            	}
+                catch (const boost::system::system_error& e)
+                {
+                    if (e.code() == boost::asio::error::connection_reset) // 10054
+                        continue;
+                	
+                    if (e.code() == boost::asio::error::connection_refused) // 10061
+                        continue;
+
+                    if (e.code() == boost::asio::error::connection_aborted) // 10053
+                        continue;
+                    
+                    std::cout << "Error with retry: " << e.what() << std::endl;
+                    continue;
                 }
+                
             }
         }
         catch (std::exception& e)
