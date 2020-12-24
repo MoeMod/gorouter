@@ -7,14 +7,13 @@
 
 #include <boost/asio/spawn.hpp>
 
-const auto read_port = 80;
+const auto read_port = 6666;
 const auto desc_host = "z4cs.com";
 const auto desc_port = "6666";
 
 bool IsValidInitialPacket(const char *buffer, std::size_t n)
 {
     return n >= 4 && !strncmp(buffer, "\xFF\xFF\xFF\xFF", 4);
-
 }
 
 int main()
