@@ -3,7 +3,6 @@
 
 #include "ThreadPoolContext.h"
 #include "ClientManager.h"
-#include "ServerList.h"
 
 #include <boost/asio/spawn.hpp>
 
