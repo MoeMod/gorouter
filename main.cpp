@@ -58,7 +58,7 @@ int main()
                 std::cout << "Resolved IP Address "  << desc_endpoint << std::endl;
             }
 
-            std::shared_ptr<TSourceEngineQuery::ServerInfoQueryResult> atomicServerInfoQueryResult;
+            std::shared_ptr<std::vector<TSourceEngineQuery::ServerInfoQueryResult>> atomicServerInfoQueryResult;
             std::shared_ptr<TSourceEngineQuery::PlayerListQueryResult> atomicPlayerListQueryResult;
         	
             boost::asio::system_timer query_timer(*ioc);
@@ -72,15 +72,16 @@ int main()
                     {
                     	try
                     	{
-                            auto finfo = tseq.GetServerInfoDataAsync(desc_endpoint, 2s, yield);
-                            auto new_spfinfo = std::make_shared<TSourceEngineQuery::ServerInfoQueryResult>(finfo);
+                            auto vecfinfo = tseq.GetServerInfoDataAsync(desc_endpoint, 2s, yield);
+                            auto new_spfinfo = std::make_shared<std::vector<TSourceEngineQuery::ServerInfoQueryResult>>(vecfinfo);
                             std::atomic_store(&atomicServerInfoQueryResult, new_spfinfo);
                     		
                             auto fplayer = tseq.GetPlayerListDataAsync(desc_endpoint, 2s, yield);
                             auto new_spfplayer = std::make_shared<TSourceEngineQuery::PlayerListQueryResult>(fplayer);
                             std::atomic_store(&atomicPlayerListQueryResult, new_spfplayer);
 
-                            std::cout << "Get TSourceEngineQuery success: " << finfo.Map << " " << finfo.PlayerCount << "/" << finfo.MaxPlayers << std::endl;
+                            if(!vecfinfo.empty())
+                                std::cout << "Get TSourceEngineQuery success: " << vecfinfo[0].Map << " " << vecfinfo[0].PlayerCount << "/" << vecfinfo[0].MaxPlayers << std::endl;
                     		
                             failed_times = 0;
                     	}
@@ -124,33 +125,32 @@ int main()
                     {
                         if (IsValidInitialPacket(buffer, n))
                         {
-                        	if(IsTSourceEngineQueryPacket(buffer, n) && false)
+                        	if(IsTSourceEngineQueryPacket(buffer, n))
                         	{
-                                boost::asio::spawn([&atomicServerInfoQueryResult, &socket, sender_endpoint, ioc, id](boost::asio::yield_context yield){
-                                    if (auto spfinfo = std::atomic_load(&atomicServerInfoQueryResult))
+                                if (auto spfinfo = std::atomic_load(&atomicServerInfoQueryResult))
+                                {
+                                    char send_buffer[4096];
+                                    auto vecfinfo = *spfinfo;
+                                    for(auto finfo : vecfinfo)
                                     {
-                                        char send_buffer[4096];
-                                        auto finfo = *spfinfo;
-                                        std::size_t len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(*spfinfo, send_buffer, sizeof(buffer));
+                                        //finfo.PlayerCount = 233;
+                                        std::size_t len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(finfo, send_buffer, sizeof(buffer));
                                         socket.async_wait(socket.wait_write, yield);
                                         std::size_t bytes_transferred = socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
                                         std::cout << "Reply package #" << id << " TSource Engine Query." << std::endl;
                                     }
-                                });
+                                }
                         	}
-                            else if(IsPlayerListQueryPacket(buffer, n) && false)
+                            else if(IsPlayerListQueryPacket(buffer, n))
                         	{
-
-                                boost::asio::spawn([&atomicPlayerListQueryResult, &socket, sender_endpoint, ioc, id](boost::asio::yield_context yield) {
-                                    if (auto spfplayer = std::atomic_load(&atomicPlayerListQueryResult))
-                                    {
-                                        char send_buffer[4096];
-                                        std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(*spfplayer, send_buffer, sizeof(buffer));
-                                        socket.async_wait(socket.wait_write, yield);
-                                        std::size_t bytes_transferred = socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
-                                        std::cout << "Reply package #" << id << " A2S_PLAYERS." << std::endl;
-                                    }
-                                });
+                                if (auto spfplayer = std::atomic_load(&atomicPlayerListQueryResult))
+                                {
+                                    char send_buffer[4096];
+                                    std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(*spfplayer, send_buffer, sizeof(buffer));
+                                    socket.async_wait(socket.wait_write, yield);
+                                    std::size_t bytes_transferred = socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
+                                    std::cout << "Reply package #" << id << " A2S_PLAYERS." << std::endl;
+                                }
                         	}
                             else if(IsPingPacket(buffer, n) && false)
                             {

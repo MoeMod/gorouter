@@ -66,7 +66,7 @@ void MSG_InitExt( sizebuf_t *sb, const char *pDebugName, void *pData, int nBytes
 void MSG_StartWriting( sizebuf_t *sb, void *pData, int nBytes, int iStartBit, int nBits )
 {
 	// make sure it's std::uint32_t aligned and padded.
-	assert(((std::uint32_t)pData & 3 ) == 0 );
+    assert((reinterpret_cast<std::uintptr_t >(pData) & 3 ) == 0 );
 
 	sb->pDebugName = "Unnamed";
 	sb->pData = (std::uint8_t *)pData;
@@ -231,7 +231,7 @@ bool MSG_WriteBits( sizebuf_t *sb, const void *pData, int nBits )
 	int	nBitsLeft = nBits;
 
 	// get output std::uint32_t-aligned.
-	while((( std::uint32_t )pOut & 3 ) != 0 && nBitsLeft >= 8 )
+	while((reinterpret_cast<std::uintptr_t>(pOut) & 3 ) != 0 && nBitsLeft >= 8 )
 	{
 		MSG_WriteUBitLong( sb, *pOut, 8 );
 
@@ -460,7 +460,7 @@ bool MSG_ReadBits( sizebuf_t *sb, void *pOutData, int nBits )
 	int	nBitsLeft = nBits;
 	
 	// get output std::uint32_t-aligned.
-	while((( std::uint32_t )pOut & 3) != 0 && nBitsLeft >= 8 )
+	while((reinterpret_cast<std::uintptr_t>(pOut) & 3) != 0 && nBitsLeft >= 8 )
 	{
 		*pOut = (std::uint8_t)MSG_ReadUBitLong( sb, 8 );
 		++pOut;

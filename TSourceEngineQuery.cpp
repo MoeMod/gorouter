@@ -38,7 +38,7 @@ auto TSourceEngineQuery::MakeServerInfoQueryResultFromBuffer(const char *reply, 
     result.header2 = buf.ReadByte(); // header ('I')
 
     if (result.header1 != -1)
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
 
     if (result.header2 == 'I')
     {
@@ -103,7 +103,7 @@ auto TSourceEngineQuery::MakeServerInfoQueryResultFromBuffer(const char *reply, 
     }
     else
     {
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
     }
     return result;
 }
@@ -140,11 +140,16 @@ std::size_t TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(const ServerI
         EDF |= result.Keywords.has_value() ? 0x20 : 0;
         EDF |= result.GameID.has_value() ? 0x10 : 0;
         MSG_WriteByte(&buf, (EDF));
-        result.Port.has_value() ? MSG_WriteShort(&buf, (result.Port.value())) : void();
-        result.SteamIDExtended.has_value() ? (MSG_WriteLong(&buf, (result.SteamIDExtended.value()[0])), MSG_WriteLong(&buf, (result.SteamIDExtended.value()[1]))) : void();
-        result.SourceTVData.has_value() ? (MSG_WriteShort(&buf, (result.SourceTVData->SourceTVPort)), MSG_WriteString(&buf, (ANSI_To_UTF8(result.SourceTVData->SourceTVName).c_str()))) : void();
-        result.Keywords.has_value() ? MSG_WriteString(&buf, (result.Keywords->c_str())) : void();
-        result.GameID.has_value() ? (MSG_WriteLong(&buf, (result.GameID.value()[0])), MSG_WriteLong(&buf, (result.GameID.value()[1]))) : void();
+        if(result.Port.has_value())
+            MSG_WriteShort(&buf, (result.Port.value()));
+        if(result.SteamIDExtended.has_value())
+            (MSG_WriteLong(&buf, (result.SteamIDExtended.value()[0])), MSG_WriteLong(&buf, (result.SteamIDExtended.value()[1])));
+        if(result.SourceTVData.has_value())
+            (MSG_WriteShort(&buf, (result.SourceTVData->SourceTVPort)), MSG_WriteString(&buf, (ANSI_To_UTF8(result.SourceTVData->SourceTVName).c_str())));
+        if(result.Keywords.has_value())
+             MSG_WriteString(&buf, (result.Keywords->c_str()));
+        if(result.GameID.has_value())
+            (MSG_WriteLong(&buf, (result.GameID.value()[0])), MSG_WriteLong(&buf, (result.GameID.value()[1])));
     }
     else if (result.header2 == 'm')
     {
@@ -178,7 +183,7 @@ std::size_t TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(const ServerI
     }
     else
     {
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
     }
     return MSG_GetNumBytesWritten(&buf);
 }
@@ -191,7 +196,7 @@ auto TSourceEngineQuery::MakePlayerListQueryResultFromBuffer(const char *reply, 
     result.header1 = buf.ReadLong();
 
     if (result.header1 != -1)
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
 
     result.header2 = buf.ReadByte();
     if (result.header2 == 'A')
@@ -214,7 +219,7 @@ auto TSourceEngineQuery::MakePlayerListQueryResultFromBuffer(const char *reply, 
     }
     else
     {
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
     }
     return result;
 }
@@ -243,7 +248,7 @@ std::size_t TSourceEngineQuery::WritePlayerListQueryResultToBuffer(const PlayerL
     }
     else
     {
-        throw std::runtime_error("unsupported protocol format");
+        throw std::invalid_argument("unsupported protocol format");
     }
     return MSG_GetNumBytesWritten(&buf);
 }
@@ -269,7 +274,7 @@ inline std::shared_ptr<boost::asio::system_timer> TimeoutCloseSocket(std::shared
 }
 
 // Reference: https://developer.valvesoftware.com/wiki/Server_queries#A2S_INFO
-auto TSourceEngineQuery::GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield) -> ServerInfoQueryResult
+auto TSourceEngineQuery::GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield) -> std::vector<ServerInfoQueryResult>
 {
     std::shared_ptr<udp::socket> socket = std::make_shared<udp::socket>(*ioc, udp::endpoint(udp::v4(), 0));
     auto ddl = TimeoutCloseSocket(ioc, socket, timeout);
@@ -281,10 +286,28 @@ auto TSourceEngineQuery::GetServerInfoDataAsync(boost::asio::ip::udp::endpoint e
     std::size_t bytes_transferred = socket->async_send_to(boost::asio::buffer(request1, sizeof(request1)), endpoint, yield);
     char buffer[4096];
     udp::endpoint sender_endpoint(udp::v4(), 0);
-    std::size_t reply_length = socket->async_receive_from(boost::asio::buffer(buffer, 4096), sender_endpoint, yield);
 
-    ddl->cancel();
-    return MakeServerInfoQueryResultFromBuffer(buffer, reply_length);
+    std::vector<ServerInfoQueryResult> result;
+
+    while(1)
+    {
+        try
+        {
+            std::size_t reply_length = socket->async_receive_from(boost::asio::buffer(buffer, 4096), sender_endpoint, yield);
+            if(sender_endpoint == endpoint && reply_length > 5)
+                result.emplace_back(MakeServerInfoQueryResultFromBuffer(buffer, reply_length));
+        }
+        catch (const std::invalid_argument &e)
+        {
+            continue;
+        }
+        catch (const boost::system::system_error& e)
+        {
+            if (e.code() == boost::system::errc::operation_canceled)
+                break;
+        }
+    }
+    return result;
 }
 
 auto TSourceEngineQuery::GetPlayerListDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield) -> PlayerListQueryResult

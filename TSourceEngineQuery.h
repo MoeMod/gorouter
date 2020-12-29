@@ -120,7 +120,7 @@ public:
 
     TSourceEngineQuery(std::shared_ptr<boost::asio::io_context> ioc);
     ~TSourceEngineQuery();
-    ServerInfoQueryResult GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield);
+    std::vector<ServerInfoQueryResult> GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield);
     PlayerListQueryResult GetPlayerListDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield);
 
 public:
