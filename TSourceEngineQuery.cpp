@@ -280,19 +280,19 @@ auto TSourceEngineQuery::GetServerInfoDataAsync(boost::asio::ip::udp::endpoint e
     auto ddl = TimeoutCloseSocket(ioc, socket, timeout);
 	
     static constexpr char request1[] = "\xFF\xFF\xFF\xFF" "TSource Engine Query"; // Source / GoldSrc Steam
-    //static constexpr char request2[] = "\xFF\xFF\xFF\xFF" "details"; // GoldSrc WON
-    //static constexpr char request3[] = "\xFF\xFF\xFF\xFF" "info"; // Xash3D
+    static constexpr char request2[] = "\xFF\xFF\xFF\xFF" "details"; // GoldSrc WON
+    static constexpr char request3[] = "\xFF\xFF\xFF\xFF" "info"; // Xash3D
 
-    std::size_t bytes_transferred = socket->async_send_to(boost::asio::buffer(request1, sizeof(request1)), endpoint, yield);
+    socket->async_send_to(boost::asio::buffer(request1, sizeof(request1)), endpoint, yield);
+    socket->async_send_to(boost::asio::buffer(request2, sizeof(request2)), endpoint, yield);
+    socket->async_send_to(boost::asio::buffer(request3, sizeof(request3)), endpoint, yield);
     char buffer[4096];
-    udp::endpoint sender_endpoint(udp::v4(), 0);
-
     std::vector<ServerInfoQueryResult> result;
-
     while(1)
     {
         try
         {
+            udp::endpoint sender_endpoint(udp::v4(), 0);
             std::size_t reply_length = socket->async_receive_from(boost::asio::buffer(buffer, 4096), sender_endpoint, yield);
             if(sender_endpoint == endpoint && reply_length > 5)
                 result.emplace_back(MakeServerInfoQueryResultFromBuffer(buffer, reply_length));

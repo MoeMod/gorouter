@@ -19,7 +19,8 @@ bool IsValidInitialPacket(const char *buffer, std::size_t n)
 
 bool IsTSourceEngineQueryPacket(const char* buffer, std::size_t n)
 {
-    return n >= 24 && !strncmp(buffer, "\xFF\xFF\xFF\xFF" "TSource Engine Query", 24);
+    return (n >= 24 && !strncmp(buffer, "\xFF\xFF\xFF\xFF" "TSource Engine Query", 24))
+		|| (n >= 11 && !strncmp(buffer, "\xFF\xFF\xFF\xFF" "details", 11));
 }
 
 bool IsPlayerListQueryPacket(const char* buffer, std::size_t n)
@@ -134,10 +135,17 @@ int main()
                                     for(auto finfo : vecfinfo)
                                     {
                                         //finfo.PlayerCount = 233;
-                                        std::size_t len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(finfo, send_buffer, sizeof(buffer));
+                                        std::size_t len;
                                         socket.async_wait(socket.wait_write, yield);
-                                        std::size_t bytes_transferred = socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
-                                        std::cout << "Reply package #" << id << " TSource Engine Query." << std::endl;
+                                    	
+                                        finfo.LocalAddress = (std::ostringstream() << read_endpoint).str();
+                                        len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(finfo, send_buffer, sizeof(buffer));
+                                        socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
+                                    	
+                                    	if(buffer[4] == 'd')
+											std::cout << "Reply package #" << id << " details to " << sender_endpoint << std::endl;
+                                        else
+											std::cout << "Reply package #" << id << " TSource Engine Query to " << sender_endpoint << std::endl;
                                     }
                                 }
                         	}
@@ -149,7 +157,7 @@ int main()
                                     std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(*spfplayer, send_buffer, sizeof(buffer));
                                     socket.async_wait(socket.wait_write, yield);
                                     std::size_t bytes_transferred = socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, yield);
-                                    std::cout << "Reply package #" << id << " A2S_PLAYERS." << std::endl;
+                                    std::cout << "Reply package #" << id << " A2S_PLAYERS to " << sender_endpoint << std::endl;
                                 }
                         	}
                             else if(IsPingPacket(buffer, n) && false)
