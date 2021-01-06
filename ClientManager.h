@@ -1,7 +1,12 @@
 #pragma once
 
+#include "log.hpp"
 #include <boost/asio.hpp>
-#include <boost/asio/spawn.hpp>
+#include <boost/asio/awaitable.hpp>
+
+#include "dummy_return.hpp"
+#include <boost/asio/use_awaitable.hpp>
+
 #include <shared_mutex>
 #include <vector>
 #include <memory>
@@ -9,15 +14,24 @@
 #include <chrono>
 #include <utility>
 
-class ClientData;
 class ClientManager
 {
+    friend class ClientData;
     using endpoint_t = boost::asio::ip::udp::endpoint;
 
     std::map<endpoint_t, std::shared_ptr<ClientData>> m_ClientMap;
     mutable std::shared_mutex sm;
+    boost::asio::io_context& ioc;
+    const endpoint_t srcds_endpoint;
+    boost::asio::ip::udp::socket& main_socket;
 
 public:
+    ClientManager(boost::asio::io_context& use_ioc, endpoint_t to, boost::asio::ip::udp::socket& out_socket) :
+        ioc(use_ioc),
+        srcds_endpoint(to),
+        main_socket(out_socket)
+	{}
+    
     // nullable
     std::shared_ptr<ClientData> GetClientData(endpoint_t ep) const
     {
@@ -26,16 +40,19 @@ public:
         return iter != m_ClientMap.end() ? iter->second : nullptr;
     }
 
-    std::shared_ptr<ClientData> AcceptClient(std::shared_ptr<boost::asio::io_context> ioc, endpoint_t from, endpoint_t to, std::function<void(const char *, std::size_t, boost::asio::yield_context yield)> callbackOnRecvSrcds);
+    std::shared_ptr<ClientData> AcceptClient(boost::asio::io_context& ioc, ClientManager::endpoint_t from);
 
-
-    std::shared_ptr<ClientData> RemoveClient(endpoint_t ep)
+    std::shared_ptr<ClientData> RemoveClient(endpoint_t client_endpoint)
     {
         std::unique_lock ul(sm);
-        if(auto iter = m_ClientMap.find(ep); iter != m_ClientMap.end())
+        if(auto iter = m_ClientMap.find(client_endpoint); iter != m_ClientMap.end())
         {
             auto sp = iter->second;
             m_ClientMap.erase(iter);
+        	
+            auto read_endpoint = main_socket.local_endpoint();
+            log("[", read_endpoint, "]", "Remove client ", client_endpoint, " (", m_ClientMap.size(), " total)");
+        	
             return sp;
         }
         return nullptr;
@@ -46,98 +63,104 @@ class ClientData : public std::enable_shared_from_this<ClientData>
 {
     using endpoint_t = boost::asio::ip::udp::endpoint;
 
-    std::chrono::system_clock::time_point last_recv_time;
+    std::atomic<std::chrono::system_clock::time_point> last_recv_time;
     ClientManager &cm;
-    const std::shared_ptr<boost::asio::io_context> ioc;
-    const endpoint_t client_endpoint;
+    boost::asio::io_context& ioc;
     const endpoint_t srcds_endpoint;
+    boost::asio::ip::udp::socket& main_socket;
+    const endpoint_t client_endpoint;
     endpoint_t::protocol_type::socket socket;
-    boost::asio::system_timer timeout_timer;
-    std::function<void(const char *, std::size_t, boost::asio::yield_context yield)> callback;
+    unsigned short port;
 
 public:
-    explicit ClientData(ClientManager &outer, std::shared_ptr<boost::asio::io_context> use_ioc, endpoint_t from, endpoint_t to, std::function<void(const char *, std::size_t, boost::asio::yield_context yield)> callbackOnRecvSrcds) :
+    explicit ClientData(ClientManager &outer, endpoint_t from) :
         cm(outer),
-        ioc(use_ioc),
+        ioc(outer.ioc),
+        srcds_endpoint(outer.srcds_endpoint),
+        main_socket(outer.main_socket),
         client_endpoint(from),
-        srcds_endpoint(to),
-        socket(*ioc, endpoint_t(endpoint_t::protocol_type::v4(), 0)),
-        timeout_timer(*ioc),
-        callback(std::move(callbackOnRecvSrcds))
+        socket(ioc, endpoint_t(endpoint_t::protocol_type::v4(), 0))
     {
         last_recv_time = std::chrono::system_clock::now();
-        std::cout << "Add new client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
     }
 
     ~ClientData()
     {
-        std::cout << "Remove client " << client_endpoint << " with port " << socket.local_endpoint().port() << " " << std::endl;
+    }
+
+    boost::asio::awaitable<void> Co_Timer()
+    {
+        using namespace std::chrono_literals;
+        try
+        {
+            boost::asio::system_timer timeout_timer(ioc);
+            while (true)
+            {
+                timeout_timer.expires_from_now(3s);
+                co_await timeout_timer.async_wait(boost::asio::use_awaitable);
+                if (std::chrono::system_clock::now() > last_recv_time.load() + 3s)
+                    break;
+            }
+
+            socket.close();
+            auto that = cm.RemoveClient(client_endpoint);
+            // auto delete this
+        }
+        catch (const boost::system::system_error& e)
+        {
+            if (e.code() == boost::system::errc::operation_canceled)
+                co_return;
+            std::cout << "Error: " << e.what() << std::endl;
+        }
+    }
+
+    boost::asio::awaitable<void> Co_Run()
+    {
+        try
+        {
+            while (true)
+            {
+                auto that = shared_from_this();
+                endpoint_t sender_endpoint;
+                char buffer[4096];
+                std::size_t n = co_await socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, boost::asio::use_awaitable);
+                if (sender_endpoint == srcds_endpoint) {
+                    // srcds => router
+                    co_await main_socket.async_wait(main_socket.wait_write, boost::asio::use_awaitable);
+                    std::size_t bytes_transferred = co_await main_socket.async_send_to(boost::asio::const_buffer(buffer, n), client_endpoint, boost::asio::use_awaitable);
+                    continue;
+                }
+            }
+        }
+        catch (const boost::system::system_error& e)
+        {
+            if (e.code() == boost::system::errc::operation_canceled)
+                co_return;
+            std::cout << "Error: " << e.what() << std::endl;
+        }
     }
 
 	void Run()
     {
-        boost::asio::spawn(*ioc, [this, that = weak_from_this()](boost::asio::yield_context yield) {
-            char buffer[4096];
-            try
-            {
-                while (true)
-                {
-                    endpoint_t sender_endpoint;
-                    std::size_t n = socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, yield);
-                    if (sender_endpoint == srcds_endpoint) {
-                        // srcds => router
-                        callback(buffer, n, yield);
-                    }
-                }
-            }
-            catch (const boost::system::system_error& e)
-            {
-                if (e.code() == boost::system::errc::operation_canceled)
-                    return;
-                std::cout << "Error: " << e.what() << std::endl;
-            }
-        });
-
-        // timeout
-        boost::asio::spawn(*ioc, [this](boost::asio::yield_context yield) {
-            using namespace std::chrono_literals;
-            try
-            {
-                while (true)
-                {
-                    timeout_timer.expires_from_now(10s);
-                    timeout_timer.async_wait(yield);
-                    if (std::chrono::system_clock::now() > last_recv_time + 10s)
-                        break;
-                }
-
-                auto that = cm.RemoveClient(client_endpoint);
-                // auto delete this
-            }
-            catch (const boost::system::system_error& e)
-            {
-                if (e.code() == boost::system::errc::operation_canceled)
-                    return;
-                std::cout << "Error: " << e.what() << std::endl;
-            }
-            });
-
+        boost::asio::co_spawn(ioc, Co_Timer(), boost::asio::detached);
+        boost::asio::co_spawn(ioc, Co_Run(), boost::asio::detached);
     }
 
-    void OnRecv(const char *buffer, std::size_t n, boost::asio::yield_context yield)
+    boost::asio::awaitable<void> OnRecv(const char *buffer, std::size_t n)
     {
         // router => srcds
         last_recv_time = std::chrono::system_clock::now();
-        socket.async_send_to(boost::asio::buffer(buffer, n), srcds_endpoint, yield);
+        co_await socket.async_wait(socket.wait_write, boost::asio::use_awaitable);
+        co_await socket.async_send_to(boost::asio::buffer(buffer, n), srcds_endpoint, boost::asio::use_awaitable);
     }
 };
 
-
-
-inline std::shared_ptr<ClientData> ClientManager::AcceptClient(std::shared_ptr<boost::asio::io_context> ioc, ClientManager::endpoint_t from, ClientManager::endpoint_t to, std::function<void(const char *, std::size_t, boost::asio::yield_context yield)> callbackOnRecvSrcds) {
+inline std::shared_ptr<ClientData> ClientManager::AcceptClient(boost::asio::io_context &ioc, ClientManager::endpoint_t client_endpoint) {
     std::unique_lock sl(sm);
-    auto cd = std::make_shared<ClientData>(*this, ioc, from, to, callbackOnRecvSrcds);
-    m_ClientMap.emplace(from, cd);
+    auto cd = std::make_shared<ClientData>(*this, client_endpoint);
+    m_ClientMap.emplace(client_endpoint, cd);
     cd->Run();
+    auto read_endpoint = main_socket.local_endpoint();
+    log("[", read_endpoint, "]", "Add new client ", client_endpoint, " (", m_ClientMap.size(), " total)");
     return cd;
 }

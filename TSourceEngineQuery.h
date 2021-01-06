@@ -7,7 +7,9 @@
 #include <variant>
 
 #include <boost/asio.hpp>
-#include <boost/asio/spawn.hpp>
+
+#include "dummy_return.hpp"
+#include <boost/asio/awaitable.hpp>
 
 class TSourceEngineQuery
 {
@@ -51,8 +53,6 @@ public:
         std::chrono::time_point<std::chrono::steady_clock> GenerateTime;
         int32_t header1;  // header -1
         uint8_t  header2; // header ('I')
-        std::string FromAddress;
-        uint16_t FromPort;
         std::optional<std::string> LocalAddress;
         uint8_t Protocol;
         std::string ServerName;
@@ -118,10 +118,10 @@ public:
         std::variant<int32_t, std::vector<PlayerInfo_s>> Results;
     };
 
-    TSourceEngineQuery(std::shared_ptr<boost::asio::io_context> ioc);
+    TSourceEngineQuery(boost::asio::io_context& ioc);
     ~TSourceEngineQuery();
-    std::vector<ServerInfoQueryResult> GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield);
-    PlayerListQueryResult GetPlayerListDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout, boost::asio::yield_context yield);
+    boost::asio::awaitable<std::vector<ServerInfoQueryResult>> GetServerInfoDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout);
+    boost::asio::awaitable<PlayerListQueryResult> GetPlayerListDataAsync(boost::asio::ip::udp::endpoint endpoint, std::chrono::seconds timeout);
 
 public:
     static ServerInfoQueryResult MakeServerInfoQueryResultFromBuffer(const char *reply, std::size_t reply_length);
@@ -131,5 +131,5 @@ public:
     static std::size_t WritePlayerListQueryResultToBuffer(const PlayerListQueryResult& res, char* buffer, std::size_t max_len);
 
 private:
-    std::shared_ptr<boost::asio::io_context> ioc;
+    boost::asio::io_context &ioc;
 };
