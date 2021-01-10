@@ -2,11 +2,11 @@
 
 #include <memory>
 #include <thread>
-#include <boost/asio.hpp>
+#include <asio.hpp>
 
 class ThreadPoolContext : public std::enable_shared_from_this<ThreadPoolContext> {
-    boost::asio::io_context io_context;
-    boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work_guard;
+    asio::io_context io_context;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard;
     std::vector<std::thread> thread_pool;
 
 public:
@@ -20,7 +20,7 @@ public:
         stop();
     }
 
-    std::shared_ptr<ThreadPoolContext> start(int thread_num = std::max<int>(std::thread::hardware_concurrency() * 2 + 1, 2))
+    std::shared_ptr<ThreadPoolContext> start(int thread_num = std::max<int>(std::thread::hardware_concurrency() + 1, 2))
     {
         assert(thread_num >= 1);
         std::generate_n(std::back_inserter(thread_pool), thread_num, std::bind(&ThreadPoolContext::make_thread, this));
@@ -48,10 +48,10 @@ public:
         });
     }
 	
-    std::shared_ptr<boost::asio::io_context> as_io_context()
+    std::shared_ptr<asio::io_context> as_io_context()
     {
         auto sp = shared_from_this();
-        return std::shared_ptr<boost::asio::io_context>(sp, &sp->io_context);
+        return std::shared_ptr<asio::io_context>(sp, &sp->io_context);
     }
 	
     static std::shared_ptr<ThreadPoolContext> create()

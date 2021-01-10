@@ -1,13 +1,16 @@
 #include <iostream>
 #include <vector>
+#include <span>
+#include <numeric>
+#include <ranges>
 
 #include "log.hpp"
 #include "ThreadPoolContext.h"
 #include "ClientManager.h"
-#include <boost/asio/awaitable.hpp>
+#include <asio/awaitable.hpp>
 
 #include "dummy_return.hpp"
-#include <boost/asio/use_awaitable.hpp>
+#include <asio/use_awaitable.hpp>
 
 #include "TSourceEngineQuery.h"
 
@@ -36,36 +39,36 @@ bool IsPingPacket(const char* buffer, std::size_t n)
     return n >= 5 && !strncmp(buffer, "\xFF\xFF\xFF\xFF" "i", 5);
 }
 
-using namespace boost::asio::ip;
+using namespace asio::ip;
 using namespace std::chrono_literals;
 
 class Citrus
 {
-    boost::asio::io_context &ioc;
-    boost::asio::system_timer query_timer;
+    asio::io_context &ioc;
     udp::endpoint desc_endpoint;
 
     std::atomic<std::shared_ptr<const std::vector<TSourceEngineQuery::ServerInfoQueryResult>>> atomicServerInfoQueryResult;
     std::atomic<std::shared_ptr<const TSourceEngineQuery::PlayerListQueryResult>> atomicPlayerListQueryResult;
 	
 public:
-    Citrus(boost::asio::io_context& ioc) :
-        ioc(ioc),
-        query_timer(ioc)
+    Citrus(asio::io_context& ioc) :
+        ioc(ioc)
     {
         
     }
 
-    void CoSpawn()
+	template<std::ranges::input_range Ports>
+    void CoSpawn(Ports ports)
     {
-        boost::asio::co_spawn(ioc, CoMain(), boost::asio::detached) ;
+        asio::co_spawn(ioc, CoMain(ports), asio::detached) ;
     }
-	
-    boost::asio::awaitable<void> CoMain()
+
+    template<std::ranges::input_range Ports>
+    asio::awaitable<void> CoMain(Ports ports)
     {
         udp::resolver resolver(ioc);
 
-        auto desc_endpoints = co_await resolver.async_resolve(udp::v4(), desc_host, desc_port, boost::asio::use_awaitable);
+        auto desc_endpoints = co_await resolver.async_resolve(udp::v4(), desc_host, desc_port, asio::use_awaitable);
         for (const auto& ep : desc_endpoints)
         {
             desc_endpoint = ep;
@@ -74,58 +77,61 @@ public:
 
         using namespace std::chrono_literals;
 
-        boost::asio::co_spawn(ioc, CoCacheTSourceEngineQuery(), boost::asio::detached);
-        boost::asio::co_spawn(ioc, CoHandlePlayerSection(27015), boost::asio::detached);
-        boost::asio::co_spawn(ioc, CoHandlePlayerSection(6666), boost::asio::detached);
+        asio::co_spawn(ioc, CoCacheTSourceEngineQuery(), asio::detached);
+
+    	for(unsigned int port : ports)
+            asio::co_spawn(ioc, CoHandlePlayerSection(port), asio::detached);
     }
 
-    boost::asio::awaitable<void> CoCacheTSourceEngineQuery()
+    asio::awaitable<void> CoCacheTSourceEngineQuery()
     {
         TSourceEngineQuery tseq(ioc);
-        int failed_times = 0;
+        std::atomic_int failed_times = 0;
         while (true)
         {
             try
             {
-                auto vecfinfo = co_await tseq.GetServerInfoDataAsync(desc_endpoint, 2s);
+                auto vecfinfo = co_await tseq.GetServerInfoDataAsync(desc_endpoint, 500ms);
                 auto new_spfinfo = std::make_shared<const std::vector<TSourceEngineQuery::ServerInfoQueryResult>>(vecfinfo);
                 atomicServerInfoQueryResult.store(new_spfinfo);
 
-                auto fplayer = co_await tseq.GetPlayerListDataAsync(desc_endpoint, 2s);
+                auto fplayer = co_await tseq.GetPlayerListDataAsync(desc_endpoint, 500ms);
                 auto new_spfplayer = std::make_shared<const TSourceEngineQuery::PlayerListQueryResult>(fplayer);
                 atomicPlayerListQueryResult.store(new_spfplayer);
 
                 if (!vecfinfo.empty())
                     log("[TSourceEngineQuery] Get TSourceEngineQuery success: ", vecfinfo[0].Map, " ", vecfinfo[0].PlayerCount, "/", vecfinfo[0].MaxPlayers);
 
-                failed_times = 0;
+                failed_times.store(0);
+            	
+                asio::system_timer query_timer(ioc, 15s);
+                co_await query_timer.async_wait(asio::use_awaitable);
             }
-            catch (const boost::system::system_error& e)
+            catch (const asio::system_error& e)
             {
-                ++failed_times;
+                failed_times.fetch_add(1);
                 log("[TSourceEngineQuery] Get TSourceEngineQuery error with retry: ", e.what());
                 continue;
             }
-            query_timer.expires_from_now(15s);
-            co_await query_timer.async_wait(boost::asio::use_awaitable);
         }
     }
 
-    boost::asio::awaitable<void> CoHandlePlayerSection(unsigned short read_port)
+    asio::awaitable<void> CoHandlePlayerSection(unsigned short read_port)
     {
-        udp::socket socket(ioc, udp::endpoint(boost::asio::ip::udp::v4(), read_port));
+        udp::socket socket(ioc, udp::endpoint(asio::ip::udp::v4(), read_port));
         auto read_endpoint = socket.local_endpoint();
         ClientManager MyClientManager(ioc, desc_endpoint, socket);
         char buffer[4096];
         int id = 0;
         log("[", read_endpoint, "]", "Start");
+        co_await socket.async_wait(socket.wait_read, asio::use_awaitable);
         while (true)
         {
             try
             {
                 ++id;
                 udp::endpoint sender_endpoint;
-                std::size_t n = co_await socket.async_receive_from(boost::asio::buffer(buffer), sender_endpoint, boost::asio::use_awaitable);
+                std::size_t n = co_await socket.async_receive_from(asio::buffer(buffer), sender_endpoint, asio::use_awaitable);
 
                 if (auto cd = MyClientManager.GetClientData(sender_endpoint))
                 {
@@ -145,12 +151,12 @@ public:
                                 {
                                     //finfo.PlayerCount = 233;
                                     std::size_t len;
-                                    co_await socket.async_wait(socket.wait_write, boost::asio::use_awaitable);
+                                    co_await socket.async_wait(socket.wait_write, asio::use_awaitable);
 
                                     finfo.LocalAddress = (std::ostringstream() << read_endpoint).str();
                                     finfo.Port = read_endpoint.port();
                                     len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(finfo, send_buffer, sizeof(buffer));
-                                    co_await socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, boost::asio::use_awaitable);
+                                    co_await socket.async_send_to(asio::const_buffer(send_buffer, len), sender_endpoint, asio::use_awaitable);
 
                                     if (buffer[4] == 'd')
                                         log("[", read_endpoint, "]", "Reply package #", id, " details to ", sender_endpoint);
@@ -165,15 +171,15 @@ public:
                             {
                                 char send_buffer[4096];
                                 std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(*spfplayer, send_buffer, sizeof(buffer));
-                                co_await socket.async_wait(socket.wait_write, boost::asio::use_awaitable);
-                                std::size_t bytes_transferred = co_await socket.async_send_to(boost::asio::const_buffer(send_buffer, len), sender_endpoint, boost::asio::use_awaitable);
+                                co_await socket.async_wait(socket.wait_write, asio::use_awaitable);
+                                std::size_t bytes_transferred = co_await socket.async_send_to(asio::const_buffer(send_buffer, len), sender_endpoint, asio::use_awaitable);
                                 log("[", read_endpoint, "]", "Reply package #", id, " A2S_PLAYERS to ", sender_endpoint);
                             }
                         }
                         else if (IsPingPacket(buffer, n) && false)
                         {
                             constexpr const char response[] = "\xFF\xFF\xFF\xFF" "j" "00000000000000";
-                            std::size_t bytes_transferred = co_await socket.async_send_to(boost::asio::buffer(response, sizeof(response)), sender_endpoint, boost::asio::use_awaitable);
+                            std::size_t bytes_transferred = co_await socket.async_send_to(asio::buffer(response, sizeof(response)), sender_endpoint, asio::use_awaitable);
                         }
                         else
                         {
@@ -188,15 +194,15 @@ public:
                     }
                 }
             }
-            catch (const boost::system::system_error& e)
+            catch (const asio::system_error& e)
             {
-                if (e.code() == boost::asio::error::connection_reset) // 10054
+                if (e.code() == asio::error::connection_reset) // 10054
                     continue;
 
-                if (e.code() == boost::asio::error::connection_refused) // 10061
+                if (e.code() == asio::error::connection_refused) // 10061
                     continue;
 
-                if (e.code() == boost::asio::error::connection_aborted) // 10053
+                if (e.code() == asio::error::connection_aborted) // 10053
                     continue;
 
                 log("[", read_endpoint, "]", "Error with retry: ", e.what());
@@ -204,20 +210,64 @@ public:
             }
         }
     }
-
-private:
-	
 };
 
-int main()
+template<std::ranges::input_range ArgsRange>
+std::vector<unsigned int> GetPortsFromArgs(ArgsRange spsv)
 {
-    boost::asio::thread_pool pool; // 4 threads
+    std::vector<unsigned int> res;
+    bool port = false;
+    bool ports = false;
+    bool portsnum = false;
+	for(std::string_view sv : spsv)
+	{
+		try
+		{
+            if (std::exchange(port, false))
+            {
+                res.push_back(std::stoi(std::string(sv)));
+            }
+            else if (std::exchange(ports, false))
+            {
+                auto left = sv.substr(0, sv.find('-'));
+                auto right = sv.substr(sv.find('-') + 1);
+                auto left_port = std::stoi(std::string(left));
+                auto right_port = std::stoi(std::string(right));
+                auto last_size = res.size();
+                res.resize(last_size + std::abs(right_port - left_port) + 1);
+                std::iota(res.begin() + last_size, res.end(), std::min(right_port, left_port));
+            }
+            else if (std::exchange(portsnum, false))
+            {
+                auto num = std::stoi(std::string(sv));
+                std::fill_n(std::back_inserter(res), num, 0);
+            }
+		}
+        catch (const std::exception& e)
+        {
+            log("[GetPortsFromArgs] error: ", e.what());
+        }
+        if (sv == "-port")
+            port = true;
+		else if (sv == "-ports")
+            ports = true;
+        else if (sv == "-portsnum")
+            portsnum = true;
+	}
+    if (res.empty())
+        res.push_back(27015);
+    return res;
+}
+
+int main(int argc, char *argv[])
+{
+    auto spsv = std::span<char *>(argv, argc) | std::ranges::views::transform([](const char* arg) { return std::string_view(arg); });
+    auto ports = GetPortsFromArgs(spsv);
+    asio::io_context ioc;
+    auto wg = make_work_guard(ioc);
+    Citrus app(ioc);
+    app.CoSpawn(ports);
 	
-    auto thread_pool = ThreadPoolContext::create();
-    Citrus app(*thread_pool->as_io_context());
-    app.CoSpawn();
-	
-    thread_pool->start();
-    thread_pool->join();
+    ioc.run();
     return 0;
 }
