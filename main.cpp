@@ -5,7 +5,6 @@
 #include <ranges>
 
 #include "log.hpp"
-#include "ThreadPoolContext.h"
 #include "ClientManager.h"
 #include <asio/awaitable.hpp>
 
@@ -47,8 +46,8 @@ class Citrus
     asio::io_context &ioc;
     udp::endpoint desc_endpoint;
 
-    std::atomic<std::shared_ptr<const std::vector<TSourceEngineQuery::ServerInfoQueryResult>>> atomicServerInfoQueryResult;
-    std::atomic<std::shared_ptr<const TSourceEngineQuery::PlayerListQueryResult>> atomicPlayerListQueryResult;
+    std::optional<std::vector<TSourceEngineQuery::ServerInfoQueryResult>> ServerInfoQueryResultCache;
+    std::optional<TSourceEngineQuery::PlayerListQueryResult> PlayerListQueryResultCache;
 	
 public:
     Citrus(asio::io_context& ioc) :
@@ -92,15 +91,15 @@ public:
             try
             {
                 auto vecfinfo = co_await tseq.GetServerInfoDataAsync(desc_endpoint, 500ms);
-                auto new_spfinfo = std::make_shared<const std::vector<TSourceEngineQuery::ServerInfoQueryResult>>(vecfinfo);
-                atomicServerInfoQueryResult.store(new_spfinfo);
-
                 auto fplayer = co_await tseq.GetPlayerListDataAsync(desc_endpoint, 500ms);
-                auto new_spfplayer = std::make_shared<const TSourceEngineQuery::PlayerListQueryResult>(fplayer);
-                atomicPlayerListQueryResult.store(new_spfplayer);
 
                 if (!vecfinfo.empty())
                     log("[TSourceEngineQuery] Get TSourceEngineQuery success: ", vecfinfo[0].Map, " ", vecfinfo[0].PlayerCount, "/", vecfinfo[0].MaxPlayers);
+                else
+                    log("[TSourceEngineQuery] Get TSourceEngineQuery failed");
+
+                ServerInfoQueryResultCache = std::move(vecfinfo);
+                PlayerListQueryResultCache = std::move(fplayer);
 
                 failed_times.store(0);
             	
@@ -143,17 +142,18 @@ public:
                     {
                         if (IsTSourceEngineQueryPacket(buffer, n))
                         {
-                            if (auto spfinfo = std::atomic_load(&atomicServerInfoQueryResult))
-                            {
+                            try{
+                                auto vecfinfo = ServerInfoQueryResultCache.value();
                                 char send_buffer[4096];
-                                auto vecfinfo = *spfinfo;
                                 for (auto finfo : vecfinfo)
                                 {
                                     //finfo.PlayerCount = 233;
                                     std::size_t len;
                                     co_await socket.async_wait(socket.wait_write, asio::use_awaitable);
 
-                                    finfo.LocalAddress = (std::ostringstream() << read_endpoint).str();
+                                    std::ostringstream oss;
+                                    oss << read_endpoint;
+                                    finfo.LocalAddress = oss.str();
                                     finfo.Port = read_endpoint.port();
                                     len = TSourceEngineQuery::WriteServerInfoQueryResultToBuffer(finfo, send_buffer, sizeof(buffer));
                                     co_await socket.async_send_to(asio::const_buffer(send_buffer, len), sender_endpoint, asio::use_awaitable);
@@ -164,17 +164,19 @@ public:
                                         log("[", read_endpoint, "]", "Reply package #", id, " TSource Engine Query to ", sender_endpoint);
                                 }
                             }
+                            catch(const std::bad_optional_access &e) {}
                         }
                         else if (IsPlayerListQueryPacket(buffer, n))
                         {
-                            if (auto spfplayer = atomicPlayerListQueryResult.load())
-                            {
+                            try {
+                                auto fplayer = PlayerListQueryResultCache.value();
                                 char send_buffer[4096];
-                                std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(*spfplayer, send_buffer, sizeof(buffer));
+                                std::size_t len = TSourceEngineQuery::WritePlayerListQueryResultToBuffer(fplayer, send_buffer, sizeof(buffer));
                                 co_await socket.async_wait(socket.wait_write, asio::use_awaitable);
                                 std::size_t bytes_transferred = co_await socket.async_send_to(asio::const_buffer(send_buffer, len), sender_endpoint, asio::use_awaitable);
                                 log("[", read_endpoint, "]", "Reply package #", id, " A2S_PLAYERS to ", sender_endpoint);
                             }
+                            catch(const std::bad_optional_access &e) {}
                         }
                         else if (IsPingPacket(buffer, n) && false)
                         {

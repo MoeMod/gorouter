@@ -15,6 +15,8 @@
 #include <utility>
 #include <system_error>
 
+class ClientData;
+
 class ClientManager
 {
     friend class ClientData;
