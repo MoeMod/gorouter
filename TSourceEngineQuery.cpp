@@ -257,6 +257,7 @@ auto TSourceEngineQuery::GetServerInfoDataAsync(asio::ip::udp::endpoint endpoint
 {
     udp::socket socket(ioc, udp::endpoint(udp::v4(), 0));
 
+    constexpr auto A2S_INFO = 'T';
     static constexpr char request1[] = "\xFF\xFF\xFF\xFF" "TSource Engine Query"; // Source / GoldSrc Steam
     static constexpr char request2[] = "\xFF\xFF\xFF\xFF" "details"; // GoldSrc WON
     static constexpr char request3[] = "\xFF\xFF\xFF\xFF" "info"; // Xash3D
@@ -287,8 +288,9 @@ auto TSourceEngineQuery::GetServerInfoDataAsync(asio::ip::udp::endpoint endpoint
             continue;
         }
         catch (const asio::system_error& e) {
-            if (e.code() == asio::error::operation_aborted)
+            if (e.code() == asio::error::operation_aborted && !result.empty())
                 break;
+            break;
         }
     }
     co_return result;
